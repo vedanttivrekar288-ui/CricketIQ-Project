@@ -8,6 +8,20 @@ import streamlit as st
 
 ROOT=Path(__file__).resolve().parent
 st.set_page_config(page_title='CricketIQ | AI Player Analytics',page_icon='🏏',layout='wide')
+# CricketIQ Navigation
+st.sidebar.page_link(
+    "app.py",
+    label="🏠 CricketIQ Dashboard",
+    icon="🏠"
+)
+
+st.sidebar.page_link(
+    "pages/1_Player_Explorer.py",
+    label="🔍 Player Explorer",
+    icon="🔍"
+)
+
+st.sidebar.divider()
 st.markdown('''<style>
 .stApp {background:#091322;color:#edf3fc}
 [data-testid="stMetric"] {background:#14243a;border:1px solid #263d57;padding:15px;border-radius:14px}
