@@ -1,543 +1,103 @@
+    if player_choice:
+        filtered = filtered[filtered.player.isin(player_choice)]
+    if filtered.empty:
+        st.warning("No records match these filters. Change the selections above.")
+        st.stop()
+    x1, x2, x3, x4 = st.columns(4)
+    x1.metric("Total runs", f"{filtered.runs.sum():,.0f}")
+    x2.metric("Recorded innings", f"{len(filtered):,}")
+    x3.metric("Runs per innings", f"{filtered.runs.mean():.1f}")
+    x4.metric("Average strike rate", f"{filtered.strike_rate.mean():.1f}")
+    st.caption("All metrics use the filtered processed batting dataset. Strike rate is the unweighted mean of innings strike rates.")
+    ranking = (filtered.groupby("player", as_index=False).agg(runs=("runs", "sum"), innings=("runs", "size"), avg_strike_rate=("strike_rate", "mean"))
+               .sort_values("runs", ascending=False))
+    team_runs = filtered.groupby("team", as_index=False).agg(runs=("runs", "sum")).sort_values("runs", ascending=False)
+    left, right = st.columns(2)
+    with left:
+        st.plotly_chart(px.bar(ranking.head(12).sort_values("runs"), x="runs", y="player", orientation="h", title="Top batters by recorded runs", color="runs", color_continuous_scale="Blues", template="plotly_dark"), use_container_width=True)
+    with right:
+        st.plotly_chart(px.scatter(ranking, x="runs", y="avg_strike_rate", size="innings", hover_name="player", title="Runs vs average strike rate", template="plotly_dark"), use_container_width=True)
+    left, right = st.columns(2)
+    with left:
+        st.plotly_chart(px.bar(team_runs, x="team", y="runs", color="team", title="Recorded runs by batting team", template="plotly_dark"), use_container_width=True)
+    with right:
+        st.plotly_chart(px.pie(team_runs, names="team", values="runs", hole=0.52, title="Team share of recorded runs", template="plotly_dark"), use_container_width=True)
+    st.subheader("Player rankings")
+    st.dataframe(ranking, use_container_width=True, hide_index=True)
+    st.download_button("Download filtered batting data", filtered.to_csv(index=False), "cricketiq_filtered_data.csv", "text/csv")
+    st.caption("Boundary counts and 50/100 milestones are not displayed because the existing processed dataset has not been verified to contain those fields.")
 
-import json
-from pathlib import Path
-
-import joblib
-import numpy as np
-import pandas as pd
-import plotly.express as px
-import streamlit as st
-
-
-# ==================================================
-# 1. WEBSITE CONFIGURATION
-# ==================================================
-
-st.set_page_config(
-    page_title="CricketIQ | AI Cricket Analytics",
-    page_icon="🏏",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-ROOT = Path(__file__).resolve().parent
-
-
-# ==================================================
-# 2. WEBSITE DESIGN
-# ==================================================
-
-st.markdown("""
-<style>
-.stApp {
-    background-color: #091322;
-    color: #edf3fc;
-}
-
-[data-testid="stMetric"] {
-    background-color: #14243a;
-    border: 1px solid #263d57;
-    padding: 15px;
-    border-radius: 14px;
-}
-
-.block-container {
-    padding-top: 1.7rem;
-}
-
-h1, h2, h3 {
-    color: #f5f8ff !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
-
-# ==================================================
-# 3. LOAD DATA AND TRAINED AI MODEL
-# ==================================================
-
-@st.cache_data
-def load_data():
-    return pd.read_csv(
-        ROOT / "ipl_batting_features.csv",
-        parse_dates=["date"]
-    )
-
-
-@st.cache_resource
-def load_model():
-    return joblib.load(ROOT / "model.joblib")
-
-
-@st.cache_data
-def load_metrics():
-    with open(ROOT / "model_metrics.json") as file:
-        return json.load(file)
-
-
-try:
-    df = load_data()
-    model = load_model()
-    metrics = load_metrics()
-
-except FileNotFoundError as error:
-    st.error(f"Required project file missing: {error}")
-    st.stop()
-
-except Exception as error:
-    st.error(f"Unable to load project files: {error}")
-    st.stop()
-
-
-# ==================================================
-# 4. WEBSITE HEADER
-# ==================================================
-
-st.title("🏏 CricketIQ")
-st.caption(
-    "AI-Powered IPL Player Performance Prediction "
-    "| Historical Cricket Analytics"
-)
-
-st.warning(
-    "Predictions are experimental estimates based "
-    "on historical data, not guaranteed match scores."
-)
-
-
-# ==================================================
-# 5. SIDEBAR NAVIGATION
-# ==================================================
-
-st.sidebar.title("🏏 CricketIQ")
-
-page = st.sidebar.radio(
-    "Navigation",
-    [
-        "🏠 Dashboard",
-        "🔍 Player Explorer",
-        "🎯 AI Prediction",
-        "🧠 Model Evaluation"
-    ]
-)
-
-players = sorted(df["player"].dropna().unique())
-
-default_player = (
-    players.index("V Kohli")
-    if "V Kohli" in players
-    else 0
-)
-
-selected_player = st.sidebar.selectbox(
-    "🔎 Search Player",
-    players,
-    index=default_player
-)
-
-st.sidebar.caption(
-    "Historical player names follow Cricsheet notation."
-)
-
-
-# ==================================================
-# 6. FILTER SELECTED PLAYER
-# ==================================================
-
-player_df = (
-    df[df["player"] == selected_player]
-    .sort_values(["date", "match_id"])
-    .copy()
-)
-
-if player_df.empty:
-    st.error("No records available for this player.")
-    st.stop()
-
-latest = player_df.iloc[-1]
-
-
-# ==================================================
-# 7. DASHBOARD PAGE
-# ==================================================
-
-if page == "🏠 Dashboard":
-
-    st.header("📊 CricketIQ Dashboard")
-
-    st.subheader(f"👤 {selected_player}")
-
-    st.write(
-        f"Latest recorded IPL team: **{latest['team']}**"
-    )
-
-    st.caption(
-        f"Historical data through: "
-        f"{metrics.get('data_end', 'Not specified')}"
-    )
-
-    col1, col2, col3, col4 = st.columns(4)
-
-    col1.metric(
-        "Recorded Innings",
-        len(player_df)
-    )
-
-    col2.metric(
-        "Total Runs in Records",
-        f"{player_df['runs'].sum():,.0f}"
-    )
-
-    col3.metric(
-        "Runs Per Innings",
-        f"{player_df['runs'].mean():.2f}"
-    )
-
-    col4.metric(
-        "Highest Score",
-        int(player_df["runs"].max())
-    )
-
-    st.caption(
-        "These statistics are calculated from the "
-        "processed feature dataset, not complete "
-        "official career records."
-    )
-
-    st.subheader("📈 Recent Batting Performance")
-
+elif page == "Player Explorer":
+    st.header(f"Player Explorer: {selected_player}")
+    st.write(f"Latest recorded team: **{latest['team']}** | Historical data through **{metrics.get('data_end', 'not specified')}**")
+    a, b, c, d = st.columns(4)
+    a.metric("Recorded innings", len(player_df))
+    b.metric("Total runs in records", f"{player_df.runs.sum():,.0f}")
+    c.metric("Runs per innings", f"{player_df.runs.mean():.1f}")
+    d.metric("Highest innings", f"{player_df.runs.max():.0f}")
+    st.caption("These are processed dataset statistics, not official complete career totals.")
     recent = player_df.tail(15).copy()
-
-    recent["match_label"] = (
-        recent["date"].dt.strftime("%d %b %Y")
-        + " vs "
-        + recent["opponent"].astype(str)
-    )
-
-    fig = px.bar(
-        recent,
-        x="match_label",
-        y="runs",
-        color="runs",
-        color_continuous_scale="Teal",
-        title="Runs in Last 15 Recorded Innings",
-        labels={
-            "match_label": "Match",
-            "runs": "Runs"
-        }
-    )
-
-    fig.update_layout(
-        template="plotly_dark",
-        xaxis_tickangle=-45,
-        coloraxis_showscale=False
-    )
-
-    st.plotly_chart(
-        fig,
-        use_container_width=True
-    )
-
-
-# ==================================================
-# 8. PLAYER EXPLORER PAGE
-# ==================================================
-
-elif page == "🔍 Player Explorer":
-
-    st.header("🔍 Player Explorer")
-
-    st.subheader(f"Player Profile: {selected_player}")
-
-    st.write(
-        f"**Latest Recorded Team:** {latest['team']}"
-    )
-
-    col1, col2, col3 = st.columns(3)
-
-    col1.metric(
-        "Recorded Innings",
-        len(player_df)
-    )
-
-    col2.metric(
-        "Total Runs",
-        f"{player_df['runs'].sum():,.0f}"
-    )
-
-    col3.metric(
-        "Average Strike Rate",
-        f"{player_df['strike_rate'].mean():.2f}"
-    )
-
-    st.subheader("🏟️ Performance Against Opponents")
-
-    opponent_stats = (
-        player_df.groupby("opponent")
-        .agg(
-            innings=("runs", "size"),
-            average_runs=("runs", "mean")
-        )
-        .reset_index()
-    )
-
-    opponent_stats = opponent_stats[
-        opponent_stats["innings"] >= 3
-    ]
-
-    fig = px.bar(
-        opponent_stats,
-        x="opponent",
-        y="average_runs",
-        color="average_runs",
-        title="Average Runs Against IPL Teams",
-        hover_data=["innings"]
-    )
-
-    fig.update_layout(template="plotly_dark")
-
-    st.plotly_chart(
-        fig,
-        use_container_width=True
-    )
-
-    st.subheader("📈 Batting Form Over Time")
-
-    form = player_df.tail(20).copy()
-
-    fig2 = px.line(
-        form,
-        x="date",
-        y="runs",
-        markers=True,
-        title="Recent Batting Performance"
-    )
-
-    fig2.update_layout(template="plotly_dark")
-
-    st.plotly_chart(
-        fig2,
-        use_container_width=True
-    )
-
-    st.subheader("📋 Historical Match Records")
-
-    display_columns = [
-        "date",
-        "team",
-        "opponent",
-        "venue",
-        "runs",
-        "balls",
-        "strike_rate"
-    ]
-
-    st.dataframe(
-        player_df[display_columns]
-        .sort_values("date", ascending=False),
-        use_container_width=True,
-        hide_index=True
-    )
-
-    st.download_button(
-        "📥 Download Player Statistics",
-        data=player_df.to_csv(index=False),
-        file_name="player_statistics.csv",
-        mime="text/csv"
-    )
-
-
-# ==================================================
-# 9. AI PERFORMANCE PREDICTION PAGE
-# ==================================================
-
-elif page == "🎯 AI Prediction":
-
-    st.header("🎯 AI Player Performance Prediction")
-
-    st.write(
-        f"Predicting batting performance for "
-        f"**{selected_player}**"
-    )
-
-    st.info(
-        "Select a hypothetical IPL match scenario. "
-        "This is not a verified upcoming fixture."
-    )
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        opponent = st.selectbox(
-            "Select Opposition Team",
-            sorted(df["opponent"].dropna().unique())
-        )
-
-    with col2:
-        venue = st.selectbox(
-            "Select Match Venue",
-            sorted(df["venue"].dropna().unique())
-        )
-
-    st.subheader("📊 Recent Player Form")
-
-    col1, col2, col3 = st.columns(3)
-
-    col1.metric(
-        "Last 3 Innings Average",
-        f"{player_df['runs'].tail(3).mean():.1f}"
-    )
-
-    col2.metric(
-        "Last 5 Innings Average",
-        f"{player_df['runs'].tail(5).mean():.1f}"
-    )
-
-    col3.metric(
-        "Last 10 Innings Average",
-        f"{player_df['runs'].tail(10).mean():.1f}"
-    )
-
-    if st.button(
-        "✨ Predict Player Runs",
-        type="primary"
-    ):
-
-        feature_cols = metrics["features"]
-
-        # Start with the most recent feature record
-        prediction_row = latest[feature_cols].to_dict()
-
-        # Update hypothetical match conditions
-        prediction_row["opponent"] = opponent
-        prediction_row["venue"] = venue
-
-        # Calculate current batting form
-        for n in [3, 5, 10]:
-
-            prediction_row[
-                f"avg_runs_last_{n}"
-            ] = float(
-                player_df["runs"].tail(n).mean()
-            )
-
-            prediction_row[
-                f"avg_sr_last_{n}"
-            ] = float(
-                player_df["strike_rate"].tail(n).mean()
-            )
-
-        prediction_row["career_avg_before"] = float(
-            player_df["runs"].mean()
-        )
-
-        prediction_row["career_sr_before"] = float(
-            player_df["strike_rate"].mean()
-        )
-
-        prediction_row["prior_matches"] = (
-            int(latest["prior_matches"]) + 1
-        )
-
-        # Convert input into model-compatible DataFrame
-        prediction_input = pd.DataFrame(
-            [prediction_row],
-            columns=feature_cols
-        )
-
-        # AI prediction
-        predicted_runs = float(
-            model.predict(prediction_input)[0]
-        )
-
-        predicted_runs = max(0, predicted_runs)
-
-        st.success("Prediction Completed Successfully!")
-
-        st.metric(
-            "🏏 Estimated Runs",
-            f"{predicted_runs:.0f}"
-        )
-
-        st.write(
-            f"**Player:** {selected_player}"
-        )
-
-        st.write(
-            f"**Opposition:** {opponent}"
-        )
-
-        st.write(
-            f"**Venue:** {venue}"
-        )
-
-        st.caption(
-            "This is a single-point estimate, "
-            "not a confidence interval."
-        )
-
-
-# ==================================================
-# 10. MACHINE LEARNING MODEL EVALUATION
-# ==================================================
-
-elif page == "🧠 Model Evaluation":
-
-    st.header("🧠 Machine Learning Model Evaluation")
-
-    st.write(
-        f"**Selected Model:** "
-        f"{metrics.get('model', 'Not specified')}"
-    )
-
-    st.write(
-        f"**Test Period Begins:** "
-        f"{metrics.get('test_start', 'Not specified')}"
-    )
-
-    st.subheader("📊 Model Comparison")
-
-    results = pd.DataFrame(
-        metrics["results"]
-    ).T
-
-    st.dataframe(
-        results,
-        use_container_width=True
-    )
-
-    st.subheader("📉 Evaluation Metrics")
-
-    st.write(
-        "**MAE:** Mean Absolute Error measures "
-        "average prediction error in runs."
-    )
-
-    st.write(
-        "**RMSE:** Root Mean Squared Error "
-        "penalizes larger prediction errors."
-    )
-
-    st.write(
-        "**R² Score:** Measures how much variation "
-        "the model explains compared with "
-        "a mean-value baseline."
-    )
-
-    st.info(
-        "Cricket innings are affected by many "
-        "unpredictable factors, so model accuracy "
-        "is limited."
-    )
-
-
-# ==================================================
-# 11. FOOTER
-# ==================================================
+    recent["match_label"] = recent.date.dt.strftime("%d %b %Y") + " vs " + recent.opponent.astype(str)
+    fig = px.bar(recent, x="match_label", y="runs", color="runs", title="Runs in last 15 recorded innings", color_continuous_scale="Teal", template="plotly_dark")
+    fig.update_layout(xaxis_tickangle=-45, coloraxis_showscale=False)
+    st.plotly_chart(fig, use_container_width=True)
+    left, right = st.columns(2)
+    with left:
+        opp = player_df.groupby("opponent", as_index=False).agg(innings=("runs", "size"), average_runs=("runs", "mean"))
+        opp = opp[opp.innings >= 3].sort_values("average_runs", ascending=False).head(12)
+        if not opp.empty:
+            st.plotly_chart(px.bar(opp, x="opponent", y="average_runs", hover_data=["innings"], title="Average runs by opponent (min 3 innings)", template="plotly_dark"), use_container_width=True)
+        else:
+            st.info("Not enough opponent records for this chart.")
+    with right:
+        st.plotly_chart(px.line(player_df.tail(20), x="date", y="runs", markers=True, title="Recent batting form over time", template="plotly_dark"), use_container_width=True)
+    st.subheader("Historical match records")
+    st.dataframe(player_df[["date", "team", "opponent", "venue", "runs", "balls", "strike_rate"]].sort_values("date", ascending=False), use_container_width=True, hide_index=True)
+    st.download_button("Download player statistics", player_df.to_csv(index=False), "player_statistics.csv", "text/csv")
+
+elif page == "AI Prediction":
+    st.header("AI Player Performance Prediction")
+    st.write(f"Selected player: **{selected_player}**")
+    st.info("Choose a hypothetical match scenario. This is not a verified upcoming IPL fixture.")
+    a, b = st.columns(2)
+    with a:
+        opponent = st.selectbox("Opposition", sorted(df.opponent.dropna().astype(str).unique()))
+    with b:
+        venue = st.selectbox("Venue", sorted(df.venue.dropna().astype(str).unique()))
+    x, y, z = st.columns(3)
+    x.metric("Last 3 innings average", f"{player_df.runs.tail(3).mean():.1f}")
+    y.metric("Last 5 innings average", f"{player_df.runs.tail(5).mean():.1f}")
+    z.metric("Last 10 innings average", f"{player_df.runs.tail(10).mean():.1f}")
+    if st.button("Predict player runs", type="primary"):
+        try:
+            model = load_model()
+            feature_cols = metrics["features"]
+            row = latest[feature_cols].to_dict()
+            row["opponent"] = opponent
+            row["venue"] = venue
+            for n in (3, 5, 10):
+                row[f"avg_runs_last_{n}"] = float(player_df.runs.tail(n).mean())
+                row[f"avg_sr_last_{n}"] = float(player_df.strike_rate.tail(n).mean())
+            row["career_avg_before"] = float(player_df.runs.mean())
+            row["career_sr_before"] = float(player_df.strike_rate.mean())
+            row["prior_matches"] = int(latest.prior_matches) + 1
+            prediction_input = pd.DataFrame([row], columns=feature_cols)
+            estimated_runs = max(0.0, float(model.predict(prediction_input)[0]))
+            st.metric("Estimated runs", f"{estimated_runs:.0f}")
+            st.write(f"{selected_player} vs {opponent} at {venue}")
+            st.caption("Experimental point estimate based on historical records; not a confidence interval or guaranteed score.")
+        except Exception as exc:
+            st.error(f"Prediction could not be completed: {exc}")
+
+elif page == "Model Evaluation":
+    st.header("Machine Learning Model Evaluation")
+    st.write(f"**Selected model:** {metrics.get('model', 'Not specified')}")
+    st.write(f"**Chronological test begins:** {metrics.get('test_start', 'Not specified')}")
+    if "results" in metrics:
+        results = pd.DataFrame(metrics["results"]).T
+        st.dataframe(results, use_container_width=True)
+    st.markdown("**MAE:** Average absolute prediction error in runs.\n\n**RMSE:** Penalizes large prediction errors more heavily.\n\n**R²:** Performance relative to a mean-value baseline; may be negative.")
+    st.info("Individual cricket innings are difficult to predict accurately due to unpredictable match conditions.")
 
 st.divider()
-
-st.caption(
-    "🏏 CricketIQ | MSc Data Science Project | "
-    "Historical IPL data: Cricsheet"
-)
+st.caption("CricketIQ | MSc Data Science Project | Historical data: Cricsheet | Educational use only")
