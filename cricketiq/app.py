@@ -128,8 +128,40 @@ elif page == "IPL Dashboard":
 elif page == "Player Analytics":
     st.header("Player Analytics and AI Prediction")
     default = players.index("V Kohli") if "V Kohli" in players else 0
-    selected = st.selectbox("Search and select a player", players, index=default)
-    p = df[df.player == selected].copy()
+    
+selected = st.selectbox(
+    "Search and select a player",
+    players,
+    index=default
+)
+
+# Get all records for the selected player
+player_data = df[df["player"] == selected].copy()
+
+# Get available IPL seasons for this player
+available_years = sorted(
+    player_data["date"].dt.year.dropna().astype(int).unique().tolist(),
+    reverse=True
+)
+
+# Year selection
+selected_year = st.selectbox(
+    "Select IPL Season",
+    ["All Seasons"] + available_years
+)
+
+# Filter records by selected season
+if selected_year == "All Seasons":
+    p = player_data.copy()
+else:
+    p = player_data[
+        player_data["date"].dt.year == selected_year
+    ].copy()
+
+if p.empty:
+    st.warning("No records available for this season.")
+    st.stop()
+
     st.subheader(f"Batting profile: {selected}")
     st.caption(f"Latest recorded team: {p.iloc[-1].team}")
     a, b, c, d = st.columns(4)
