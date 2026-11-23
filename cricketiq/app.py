@@ -94,3 +94,89 @@ elif page == "IPL Dashboard":
         filtered = filtered[filtered.date.dt.year == year_choice]
     if team_choice:
         filtered = filtered[filtered.team.isin(team_choice)]
+        
+    if player_choice:
+        filtered = filtered[filtered.player.isin(player_choice)]
+
+    if filtered.empty:
+        st.warning("No records found for these filters.")
+    else:
+        st.subheader("Batting Performance Overview")
+
+        a, b, c, d = st.columns(4)
+
+        a.metric("Total Runs", f"{filtered.runs.sum():,.0f}")
+        b.metric("Recorded Innings", f"{len(filtered):,}")
+        c.metric("Average Strike Rate", f"{filtered.strike_rate.mean():.2f}")
+        d.metric("Total Players", f"{filtered.player.nunique():,}")
+
+        player_stats = (
+            filtered.groupby("player", as_index=False)
+            .agg(
+                total_runs=("runs", "sum"),
+                innings=("runs", "size"),
+                avg_strike_rate=("strike_rate", "mean")
+            )
+            .sort_values("total_runs", ascending=False)
+        )
+
+        st.subheader("Top 10 Run Scorers")
+
+        fig = px.bar(
+            player_stats.head(10),
+            x="total_runs",
+            y="player",
+            orientation="h",
+            color="total_runs",
+            color_continuous_scale="Turbo",
+            title="Runs by Player"
+        )
+        fig.update_layout(
+            template="plotly_dark",
+            yaxis={"categoryorder": "total ascending"}
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        left, right = st.columns(2)
+
+        with left:
+            st.subheader("Runs vs Strike Rate")
+
+            fig2 = px.scatter(
+                player_stats,
+                x="total_runs",
+                y="avg_strike_rate",
+                size="innings",
+                hover_name="player",
+                color="total_runs",
+                title="Player Batting Comparison",
+                template="plotly_dark"
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+
+        with right:
+            st.subheader("Runs by Team")
+
+            team_stats = (
+                filtered.groupby("team", as_index=False)["runs"]
+                .sum()
+            )
+
+            fig3 = px.pie(
+                team_stats,
+                names="team",
+                values="runs",
+                hole=0.55,
+                title="Team Run Distribution",
+                template="plotly_dark"
+            )
+            st.plotly_chart(fig3, use_container_width=True)
+
+        st.subheader("Batting Performance Table")
+
+        st.dataframe(
+            player_stats,
+            use_container_width=True,
+            hide_index=True
+        )
+
