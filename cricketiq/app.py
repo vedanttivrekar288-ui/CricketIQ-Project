@@ -1,103 +1,96 @@
-    if player_choice:
-        filtered = filtered[filtered.player.isin(player_choice)]
-    if filtered.empty:
-        st.warning("No records match these filters. Change the selections above.")
-        st.stop()
-    x1, x2, x3, x4 = st.columns(4)
-    x1.metric("Total runs", f"{filtered.runs.sum():,.0f}")
-    x2.metric("Recorded innings", f"{len(filtered):,}")
-    x3.metric("Runs per innings", f"{filtered.runs.mean():.1f}")
-    x4.metric("Average strike rate", f"{filtered.strike_rate.mean():.1f}")
-    st.caption("All metrics use the filtered processed batting dataset. Strike rate is the unweighted mean of innings strike rates.")
-    ranking = (filtered.groupby("player", as_index=False).agg(runs=("runs", "sum"), innings=("runs", "size"), avg_strike_rate=("strike_rate", "mean"))
-               .sort_values("runs", ascending=False))
-    team_runs = filtered.groupby("team", as_index=False).agg(runs=("runs", "sum")).sort_values("runs", ascending=False)
-    left, right = st.columns(2)
-    with left:
-        st.plotly_chart(px.bar(ranking.head(12).sort_values("runs"), x="runs", y="player", orientation="h", title="Top batters by recorded runs", color="runs", color_continuous_scale="Blues", template="plotly_dark"), use_container_width=True)
-    with right:
-        st.plotly_chart(px.scatter(ranking, x="runs", y="avg_strike_rate", size="innings", hover_name="player", title="Runs vs average strike rate", template="plotly_dark"), use_container_width=True)
-    left, right = st.columns(2)
-    with left:
-        st.plotly_chart(px.bar(team_runs, x="team", y="runs", color="team", title="Recorded runs by batting team", template="plotly_dark"), use_container_width=True)
-    with right:
-        st.plotly_chart(px.pie(team_runs, names="team", values="runs", hole=0.52, title="Team share of recorded runs", template="plotly_dark"), use_container_width=True)
-    st.subheader("Player rankings")
-    st.dataframe(ranking, use_container_width=True, hide_index=True)
-    st.download_button("Download filtered batting data", filtered.to_csv(index=False), "cricketiq_filtered_data.csv", "text/csv")
-    st.caption("Boundary counts and 50/100 milestones are not displayed because the existing processed dataset has not been verified to contain those fields.")
+import json
+from pathlib import Path
 
-elif page == "Player Explorer":
-    st.header(f"Player Explorer: {selected_player}")
-    st.write(f"Latest recorded team: **{latest['team']}** | Historical data through **{metrics.get('data_end', 'not specified')}**")
-    a, b, c, d = st.columns(4)
-    a.metric("Recorded innings", len(player_df))
-    b.metric("Total runs in records", f"{player_df.runs.sum():,.0f}")
-    c.metric("Runs per innings", f"{player_df.runs.mean():.1f}")
-    d.metric("Highest innings", f"{player_df.runs.max():.0f}")
-    st.caption("These are processed dataset statistics, not official complete career totals.")
-    recent = player_df.tail(15).copy()
-    recent["match_label"] = recent.date.dt.strftime("%d %b %Y") + " vs " + recent.opponent.astype(str)
-    fig = px.bar(recent, x="match_label", y="runs", color="runs", title="Runs in last 15 recorded innings", color_continuous_scale="Teal", template="plotly_dark")
-    fig.update_layout(xaxis_tickangle=-45, coloraxis_showscale=False)
-    st.plotly_chart(fig, use_container_width=True)
-    left, right = st.columns(2)
-    with left:
-        opp = player_df.groupby("opponent", as_index=False).agg(innings=("runs", "size"), average_runs=("runs", "mean"))
-        opp = opp[opp.innings >= 3].sort_values("average_runs", ascending=False).head(12)
-        if not opp.empty:
-            st.plotly_chart(px.bar(opp, x="opponent", y="average_runs", hover_data=["innings"], title="Average runs by opponent (min 3 innings)", template="plotly_dark"), use_container_width=True)
-        else:
-            st.info("Not enough opponent records for this chart.")
-    with right:
-        st.plotly_chart(px.line(player_df.tail(20), x="date", y="runs", markers=True, title="Recent batting form over time", template="plotly_dark"), use_container_width=True)
-    st.subheader("Historical match records")
-    st.dataframe(player_df[["date", "team", "opponent", "venue", "runs", "balls", "strike_rate"]].sort_values("date", ascending=False), use_container_width=True, hide_index=True)
-    st.download_button("Download player statistics", player_df.to_csv(index=False), "player_statistics.csv", "text/csv")
+import joblib
+import pandas as pd
+import plotly.express as px
+import streamlit as st
 
-elif page == "AI Prediction":
-    st.header("AI Player Performance Prediction")
-    st.write(f"Selected player: **{selected_player}**")
-    st.info("Choose a hypothetical match scenario. This is not a verified upcoming IPL fixture.")
-    a, b = st.columns(2)
-    with a:
-        opponent = st.selectbox("Opposition", sorted(df.opponent.dropna().astype(str).unique()))
-    with b:
-        venue = st.selectbox("Venue", sorted(df.venue.dropna().astype(str).unique()))
-    x, y, z = st.columns(3)
-    x.metric("Last 3 innings average", f"{player_df.runs.tail(3).mean():.1f}")
-    y.metric("Last 5 innings average", f"{player_df.runs.tail(5).mean():.1f}")
-    z.metric("Last 10 innings average", f"{player_df.runs.tail(10).mean():.1f}")
-    if st.button("Predict player runs", type="primary"):
-        try:
-            model = load_model()
-            feature_cols = metrics["features"]
-            row = latest[feature_cols].to_dict()
-            row["opponent"] = opponent
-            row["venue"] = venue
-            for n in (3, 5, 10):
-                row[f"avg_runs_last_{n}"] = float(player_df.runs.tail(n).mean())
-                row[f"avg_sr_last_{n}"] = float(player_df.strike_rate.tail(n).mean())
-            row["career_avg_before"] = float(player_df.runs.mean())
-            row["career_sr_before"] = float(player_df.strike_rate.mean())
-            row["prior_matches"] = int(latest.prior_matches) + 1
-            prediction_input = pd.DataFrame([row], columns=feature_cols)
-            estimated_runs = max(0.0, float(model.predict(prediction_input)[0]))
-            st.metric("Estimated runs", f"{estimated_runs:.0f}")
-            st.write(f"{selected_player} vs {opponent} at {venue}")
-            st.caption("Experimental point estimate based on historical records; not a confidence interval or guaranteed score.")
-        except Exception as exc:
-            st.error(f"Prediction could not be completed: {exc}")
+st.set_page_config(page_title="CricketIQ | Cricket Analytics", page_icon="CI", layout="wide", initial_sidebar_state="collapsed")
+ROOT = Path(__file__).resolve().parent
 
-elif page == "Model Evaluation":
-    st.header("Machine Learning Model Evaluation")
-    st.write(f"**Selected model:** {metrics.get('model', 'Not specified')}")
-    st.write(f"**Chronological test begins:** {metrics.get('test_start', 'Not specified')}")
-    if "results" in metrics:
-        results = pd.DataFrame(metrics["results"]).T
-        st.dataframe(results, use_container_width=True)
-    st.markdown("**MAE:** Average absolute prediction error in runs.\n\n**RMSE:** Penalizes large prediction errors more heavily.\n\n**R²:** Performance relative to a mean-value baseline; may be negative.")
-    st.info("Individual cricket innings are difficult to predict accurately due to unpredictable match conditions.")
+st.markdown("""<style>
+.stApp {background:#081426;color:#edf3fc}
+.block-container {padding-top:1.5rem;max-width:1450px}
+h1,h2,h3 {color:#f6f9ff!important}
+[data-testid="stMetric"] {background:#142641;border:1px solid #284364;padding:16px;border-radius:14px}
+[data-testid="stSidebar"] {background:#0d1b30}
+div.stButton>button[kind="primary"] {background:#0879e8;border-color:#0879e8}
+.hero {background:linear-gradient(120deg,#112c52,#102039);padding:35px;border:1px solid #29486b;border-radius:18px;margin:10px 0 24px}
+.hero h1 {font-size:3rem;margin:0}
+.hero p {color:#c3d2e5;font-size:1.1rem}
+</style>""", unsafe_allow_html=True)
 
+@st.cache_data
+def load_data():
+    return pd.read_csv(ROOT / "ipl_batting_features.csv", parse_dates=["date"])
+
+@st.cache_resource
+def load_model():
+    return joblib.load(ROOT / "model.joblib")
+
+@st.cache_data
+def load_metrics():
+    return json.loads((ROOT / "model_metrics.json").read_text(encoding="utf-8"))
+
+try:
+    df = load_data()
+    metrics = load_metrics()
+except (FileNotFoundError, ValueError, KeyError) as exc:
+    st.error(f"Could not load cricket data or metrics: {exc}")
+    st.stop()
+
+required = {"player", "date", "match_id", "team", "opponent", "venue", "runs", "balls", "strike_rate", "prior_matches"}
+missing = required - set(df.columns)
+if missing:
+    st.error("Missing dataset columns: " + ", ".join(sorted(missing)))
+    st.stop()
+
+df = df.dropna(subset=["player", "date", "runs"]).sort_values(["date", "match_id"]).copy()
+if df.empty:
+    st.error("No valid batting records found.")
+    st.stop()
+
+st.markdown("## CricketIQ")
+st.caption("AI-powered IPL batting analytics | Historical Cricsheet records | MSc Data Science project")
+page = st.radio("Website sections", ["Home", "IPL Dashboard", "Player Explorer", "AI Prediction", "Model Evaluation"], horizontal=True, label_visibility="collapsed")
 st.divider()
-st.caption("CricketIQ | MSc Data Science Project | Historical data: Cricsheet | Educational use only")
+
+players = sorted(df["player"].astype(str).unique())
+default_player = players.index("V Kohli") if "V Kohli" in players else 0
+
+# Player selection comes before all player-specific information.
+if page in ("Player Explorer", "AI Prediction"):
+    selected_player = st.selectbox("Search and select a player", players, index=default_player)
+    player_df = df.loc[df["player"] == selected_player].sort_values(["date", "match_id"]).copy()
+    latest = player_df.iloc[-1]
+
+if page == "Home":
+    st.markdown("""<div class="hero"><h1>Explore cricket through data.</h1>
+    <p>Analyze IPL batting performances, discover player trends and estimate runs using machine learning.</p>
+    <p>One platform. Historical statistics. Interactive insights.</p></div>""", unsafe_allow_html=True)
+    a, b, c, d = st.columns(4)
+    a.metric("Players in dataset", f"{df.player.nunique():,}")
+    b.metric("Recorded innings", f"{len(df):,}")
+    c.metric("Runs in records", f"{df.runs.sum():,.0f}")
+    d.metric("Teams in dataset", f"{df.team.nunique():,}")
+    st.subheader("What you can explore")
+    st.markdown("**IPL Dashboard:** Filter historical records and compare teams and players.\n\n**Player Explorer:** Study batting form and opponent performance.\n\n**AI Prediction:** Estimate runs for a hypothetical match using your trained model.\n\n**Model Evaluation:** Review testing results and model limitations.")
+    st.info("The dataset contains processed historical records, not complete official career totals or live match information.")
+
+elif page == "IPL Dashboard":
+    st.header("IPL Batting Analytics Dashboard")
+    f1, f2, f3 = st.columns([1, 2, 2])
+    years = sorted(df.date.dt.year.dropna().astype(int).unique().tolist())
+    with f1:
+        year_choice = st.selectbox("Season", ["All seasons"] + years)
+    with f2:
+        teams = sorted(df.team.dropna().astype(str).unique())
+        team_choice = st.multiselect("Batting team", teams, default=[])
+    with f3:
+        player_choice = st.multiselect("Players", players, default=[])
+    filtered = df.copy()
+    if year_choice != "All seasons":
+        filtered = filtered[filtered.date.dt.year == year_choice]
+    if team_choice:
+        filtered = filtered[filtered.team.isin(team_choice)]
