@@ -125,109 +125,197 @@ elif page == "IPL Dashboard":
         st.dataframe(stats.sort_values("total_runs", ascending=False), use_container_width=True, hide_index=True)
         st.download_button("Download filtered records", filtered.to_csv(index=False).encode("utf-8"), "cricketiq_filtered.csv", "text/csv")
 
+
 elif page == "Player Analytics":
     st.header("Player Analytics and AI Prediction")
+
     default = players.index("V Kohli") if "V Kohli" in players else 0
-    
-selected = st.selectbox(
-    "Search and select a player",
-    players,
-    index=default
-)
 
-# Get all records for the selected player
-player_data = df[df["player"] == selected].copy()
+    selected = st.selectbox(
+        "Search and select a player",
+        players,
+        index=default
+    )
 
-# Get available IPL seasons for this player
-available_years = sorted(
-    player_data["date"].dt.year.dropna().astype(int).unique().tolist(),
-    reverse=True
-)
+    player_data = df[df["player"] == selected].copy()
+    player_data = player_data.sort_values("date")
 
-# Year selection
-selected_year = st.selectbox(
-    "Select IPL Season",
-    ["All Seasons"] + available_years
-)
+    available_years = sorted(
+        player_data["date"].dt.year.dropna().astype(int).unique().tolist(),
+        reverse=True
+    )
 
-# Filter records by selected season
-if selected_year == "All Seasons":
-    p = player_data.copy()
-else:
-    p = player_data[
-        player_data["date"].dt.year == selected_year
-    ].copy()
+    selected_year = st.selectbox(
+        "Select IPL Season",
+        ["All Seasons"] + available_years
+    )
 
-if p.empty:
-    st.warning("No records available for this season.")
-    st.stop()
+    if selected_year == "All Seasons":
+        p = player_data.copy()
+    else:
+        p = player_data[
+            player_data["date"].dt.year == selected_year
+        ].copy()
 
-    st.subheader(f"Batting profile: {selected}")
-    st.caption(f"Latest recorded team: {p.iloc[-1].team}")
-    a, b, c, d = st.columns(4)
-    a.metric("Recorded Innings", f"{len(p):,}")
-    b.metric("Total Runs", f"{p.runs.sum():,.0f}")
-    c.metric("Runs per Innings", f"{p.runs.mean():.1f}")
-    d.metric("Highest Score", f"{p.runs.max():.0f}")
-    st.caption("Summaries cover the available feature records, not official complete career totals.")
-    recent = p.tail(15).copy()
-    recent["match_label"] = recent.date.dt.strftime("%d %b %Y") + " | " + recent.opponent
-    st.subheader("Recent batting form")
-    fig = px.bar(recent, x="match_label", y="runs", color="runs", color_continuous_scale="Blues", template="plotly_dark", labels={"match_label":"Match", "runs":"Runs"})
-    fig.update_layout(xaxis_tickangle=-45, coloraxis_showscale=False)
-    st.plotly_chart(fig, use_container_width=True)
-    st.subheader("Opponent analysis")
-    opp = p.groupby("opponent", as_index=False).agg(innings=("runs", "size"), average_runs=("runs", "mean"))
-    fig = px.bar(opp.sort_values("average_runs", ascending=False).head(12), x="opponent", y="average_runs", hover_data=["innings"], template="plotly_dark", labels={"average_runs":"Average runs"})
-    st.plotly_chart(fig, use_container_width=True)
-    st.subheader("Recent scorecards")
-    columns = [c for c in ["date", "team", "opponent", "venue", "runs", "balls", "strike_rate"] if c in p]
-    st.dataframe(p[columns].tail(10).sort_values("date", ascending=False), use_container_width=True, hide_index=True)
-    st.download_button("Download player statistics", p.to_csv(index=False).encode("utf-8"), "player_statistics.csv", "text/csv")
+    if p.empty:
+        st.warning("No records available for this season.")
+    else:
+        st.subheader(f"Batting Profile: {selected}")
+        st.caption(f"Latest recorded team: {p.iloc[-1]['team']}")
 
-    st.divider()
-    st.header("AI Player Runs Prediction")
-    latest = p.iloc[-1]
-    st.caption("Select a hypothetical match scenario. Predictions are estimates, not guaranteed scores or verified upcoming fixtures.")
-    left, right = st.columns(2)
-    with left:
-        opponent = st.selectbox("Opposition", sorted(df.opponent.unique().tolist()))
-    with right:
-        venue = st.selectbox("Venue", sorted(df.venue.unique().tolist()))
-    if st.button("Predict player runs", type="primary"):
-        try:
-            metrics = load_metrics()
-            model = load_model()
-            features = metrics.get("features")
-            if not isinstance(features, list) or not features:
-                raise ValueError("model_metrics.json must contain a nonempty 'features' list")
-            missing = [col for col in features if col not in latest.index]
-            if missing:
-                raise ValueError("Prediction features missing from CSV: " + ", ".join(missing))
-            row = latest[features].to_dict()
-            if "opponent" in features:
-                row["opponent"] = opponent
-            if "venue" in features:
-                row["venue"] = venue
-            for n in (3, 5, 10):
-                if f"avg_runs_last_{n}" in features:
-                    row[f"avg_runs_last_{n}"] = float(p.runs.tail(n).mean())
-                if f"avg_sr_last_{n}" in features:
-                    row[f"avg_sr_last_{n}"] = float(p.strike_rate.tail(n).mean())
-            if "career_avg_before" in features:
-                row["career_avg_before"] = float(p.runs.mean())
-            if "career_sr_before" in features:
-                row["career_sr_before"] = float(p.strike_rate.mean())
-            if "prior_matches" in features:
-                row["prior_matches"] = int(pd.to_numeric(latest["prior_matches"], errors="coerce")) + 1
-            estimate = float(model.predict(pd.DataFrame([row], columns=features))[0])
-            if not np.isfinite(estimate):
-                raise ValueError("Model returned a non-finite prediction")
-            st.metric("Estimated runs", f"{max(0, estimate):.0f}")
-            st.write(f"{selected} vs {opponent} at {venue}")
-            st.caption("Single-point prediction from historical data; this is not a confidence interval.")
-        except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
-            st.error(f"Prediction unavailable: {exc}")
+        a, b, c, d = st.columns(4)
+        a.metric("Recorded Innings", f"{len(p):,}")
+        b.metric("Total Runs", f"{p['runs'].sum():,.0f}")
+        c.metric("Runs per Innings", f"{p['runs'].mean():.1f}")
+        d.metric("Highest Score", f"{p['runs'].max():.0f}")
+
+        st.caption("Statistics are based on available historical records.")
+
+        st.subheader("Recent Batting Performance")
+        recent = p.tail(15).copy()
+        recent["match_label"] = (
+            recent["date"].dt.strftime("%d %b %Y")
+            + " | "
+            + recent["opponent"].astype(str)
+        )
+
+        fig = px.bar(
+            recent,
+            x="match_label",
+            y="runs",
+            color="runs",
+            color_continuous_scale="Blues",
+            template="plotly_dark",
+            labels={"match_label": "Match", "runs": "Runs"}
+        )
+        fig.update_layout(
+            xaxis_tickangle=-45,
+            coloraxis_showscale=False
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        st.subheader("Opponent Analysis")
+        opp = p.groupby("opponent", as_index=False).agg(
+            innings=("runs", "size"),
+            average_runs=("runs", "mean")
+        )
+
+        fig2 = px.bar(
+            opp.sort_values("average_runs", ascending=False).head(12),
+            x="opponent",
+            y="average_runs",
+            hover_data=["innings"],
+            template="plotly_dark",
+            labels={"average_runs": "Average Runs"}
+        )
+        st.plotly_chart(fig2, use_container_width=True)
+
+        st.subheader("Recent Scorecards")
+        columns = [
+            c for c in [
+                "date", "team", "opponent", "venue",
+                "runs", "balls", "strike_rate"
+            ] if c in p.columns
+        ]
+
+        st.dataframe(
+            p[columns].tail(10).sort_values("date", ascending=False),
+            use_container_width=True,
+            hide_index=True
+        )
+
+        st.download_button(
+            "Download Player Statistics",
+            p.to_csv(index=False).encode("utf-8"),
+            "player_statistics.csv",
+            "text/csv"
+        )
+
+        st.divider()
+        st.header("AI Player Runs Prediction")
+
+        latest = p.iloc[-1]
+        st.caption("Predict estimated runs for a hypothetical IPL match.")
+
+        left, right = st.columns(2)
+
+        with left:
+            opponent = st.selectbox(
+                "Opposition",
+                sorted(df["opponent"].dropna().unique().tolist())
+            )
+
+        with right:
+            venue = st.selectbox(
+                "Venue",
+                sorted(df["venue"].dropna().unique().tolist())
+            )
+
+        if st.button("Predict Player Runs", type="primary"):
+            try:
+                metrics = load_metrics()
+                model = load_model()
+                features = metrics.get("features", [])
+
+                if not features:
+                    raise ValueError("Model features not found.")
+
+                missing = [f for f in features if f not in latest.index]
+                if missing:
+                    raise ValueError(
+                        "Missing model features: " + ", ".join(missing)
+                    )
+
+                row = latest[features].to_dict()
+
+                if "opponent" in features:
+                    row["opponent"] = opponent
+                if "venue" in features:
+                    row["venue"] = venue
+
+                for n in (3, 5, 10):
+                    if f"avg_runs_last_{n}" in features:
+                        row[f"avg_runs_last_{n}"] = float(
+                            p["runs"].tail(n).mean()
+                        )
+                    if f"avg_sr_last_{n}" in features:
+                        row[f"avg_sr_last_{n}"] = float(
+                            p["strike_rate"].tail(n).mean()
+                        )
+
+                if "career_avg_before" in features:
+                    row["career_avg_before"] = float(p["runs"].mean())
+
+                if "career_sr_before" in features:
+                    row["career_sr_before"] = float(
+                        p["strike_rate"].mean()
+                    )
+
+                if "prior_matches" in features:
+                    row["prior_matches"] = int(
+                        pd.to_numeric(
+                            latest["prior_matches"], errors="coerce"
+                        )
+                    ) + 1
+
+                prediction = float(
+                    model.predict(
+                        pd.DataFrame([row], columns=features)
+                    )[0]
+                )
+
+                if not np.isfinite(prediction):
+                    raise ValueError("Invalid model prediction.")
+
+                st.success("Prediction completed")
+                st.metric("Estimated Runs", f"{max(0, prediction):.0f}")
+                st.write(f"{selected} vs {opponent} at {venue}")
+                st.caption(
+                    "Prediction is an estimate based on historical data."
+                )
+
+            except Exception as e:
+                st.error(f"Prediction unavailable: {e}")
 
 elif page == "Model Evaluation":
     st.header("Model Evaluation")
